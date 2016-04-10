@@ -29,7 +29,9 @@ class FAQAdmin extends ModelAdmin
             'Question' => 'Question',
             'Answer' => 'Answer',
             'Keywords' => 'Keywords',
-            'Category.Name' => 'Category'
+            'Category' => function ($category) {
+                return $category->Name;
+            }
         );
 
         $this->extend('updateFAQExportFields', $fields);
