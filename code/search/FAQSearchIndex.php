@@ -6,7 +6,6 @@
  */
 class FAQSearchIndex extends SolrIndex
 {
-    
     /**
      * Adds FAQ fields to the index
      */
@@ -75,6 +74,7 @@ class FAQSearchIndex extends SolrIndex
     /**
      * Overwrite extra paths functions to only use the path defined on the yaml file
      * We can create/overwrite new .txt templates for only this index
+     *
      * @see SolrIndex::getExtrasPath
      */
     public function getExtrasPath()
@@ -91,6 +91,7 @@ class FAQSearchIndex extends SolrIndex
     
     /**
      * Overwrite template paths to only use the path defined on the yaml file
+     *
      * @see SolrIndex::getTemplatesPath
      */
     public function getTemplatesPath()
@@ -104,9 +105,9 @@ class FAQSearchIndex extends SolrIndex
         return $this->templatesPath ? $this->templatesPath : $globalOptions['templatespath'];
     }
 
-
     /**
      * Overloaded to remove compulsory matching on all words
+     *
      * @see SolrIndex::getQueryComponent
      */
     protected function getQueryComponent(SearchQuery $searchQuery, &$hlq = array())
