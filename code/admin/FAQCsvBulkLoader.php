@@ -17,7 +17,7 @@ class FAQCsvBulkLoader extends CsvBulkLoader
     );
    
     /**
-     * Avoids creating new categories if not found in the root taxonomy
+     * Avoids creating new categories if not found in the root taxonomy by default.
      * It will get the right CategoryID link, or leave the FAQ without categories.
      */
     public static function getCategoryByName(&$obj, $val, $record)
@@ -29,11 +29,20 @@ class FAQCsvBulkLoader extends CsvBulkLoader
             return null;
         }
 
-        $category = $root->getChildDeep(array('Name' => trim($val)));
+        $category = $root->getChildDeep(array('Name' => $val));
         
+        if ((!$category || !$category->exists()) && $val && Config::inst()->get('FAQ', 'create_missing_category')) {
+            $category = new TaxonomyTerm(array(
+                'Name' => $val,
+                'ParentID' => $root->ID
+            ));
+            $category->write();
+        }
+
         if ($category && $category->exists()) {
             $obj->CategoryID = $category->ID;
             $obj->write();
         }
+
     }
 }
