@@ -247,24 +247,43 @@ class FAQPage_Controller extends Page_Controller
     }
     
     /**
-     * Render individual view for FAQ
-     * @return FAQ|404 error if faq not found
+     * Render individual view for FAQ, record the view if tracking ID is passed
+     * from a search result set for example.
+     *
+     * @return array|SS_HTTPResponse FAQ content or 404 error if FAQ not found
      */
-    public function view()
+    public function view(SS_HTTPRequest $request)
     {
-        $faq = FAQ::get()->filter('ID', $this->request->param('ID'))->first();
-        
+        $faq = FAQ::get()->filter('ID', $request->param('ID'))->first();
         if ($faq === null) {
             $this->httpError(404);
         }
 
+        // Record the view of article and link it to the search and result set
+        $trackingID = $request->getVar('t');
+        $sessID = session_id();
+        if ($trackingID && $sessID) {
+            $resultsLog = FAQResults::get()->filter(array(
+                'ID' => $trackingID
+            ))->first();
+
+            if ($resultsLog && $resultsLog->exists() && $resultsLog->Search()->SessionID == $sessID) {
+                $articleLogID = FAQResults_Article::create(array(
+                    'SearchID' => $resultsLog->SearchID,
+                    'ResultSetID' => $resultsLog->ID,
+                    'FAQID' => $faq->ID
+                ))->write();
+            }
+        }
         return array('FAQ' => $faq);
     }
 
 
     /**
-     * Search function. Called from index() if we have a search term.
-     * @return HTMLText search results template.
+     * Search function. Called from index() if we have a search term. Record the
+     * search if session exists.
+     *
+     * @return array Including search results as a PaginatedList.
      */
     public function search()
     {
@@ -290,6 +309,33 @@ class FAQPage_Controller extends Page_Controller
 
             $results = $searchResult->Matches;
 
+            // Log the search query and result set for the query
+            $sessID = session_id();
+            $trackingID = null;
+            if ($sessID) {
+                $searchLogID = FAQSearch::create(array(
+                    'SessionID' => $sessID,
+                    'Term' => $keywords,
+                    'TotalResults' => $results->getTotalItems()
+                ))->write();
+
+                if ($searchLogID) {
+                    $resultsLogID = FAQResults::create(array(
+                        'SearchID' => $searchLogID,
+                        'ArticleSet' => json_encode(array_keys($results->map())),
+                        'SetSize' => count($results->map())
+                    ))->write();
+                }
+                $trackingID = $resultsLogID;
+            }
+
+            // Loop through page of results and append the tracking code
+            if ($trackingID) {
+                foreach ($results as $result) {
+                    $result->trackingID = $trackingID;
+                }
+            }
+
             // if the suggested query has a trailing '?' then hide the hardcoded one from 'Did you mean <Suggestion>?'
             $showTrailingQuestionmark = !preg_match('/\?$/', $searchResult->Suggestion);
 
@@ -299,7 +345,12 @@ class FAQPage_Controller extends Page_Controller
                 'SuggestionNice' => $searchResult->SuggestionNice,
                 'SuggestionQueryString' => $this->makeQueryLink($searchResult->SuggestionQueryString)
             );
-            $renderData = $this->parseSearchResults($results, $suggestionData, $keywords);
+            $renderData = $this->parseSearchResults(
+                $results,
+                $suggestionData,
+                $keywords
+            );
+
         } catch (Exception $e) {
             $renderData = array('SearchError' => true);
             SS_Log::log($e, SS_Log::WARN);
@@ -368,7 +419,8 @@ class FAQPage_Controller extends Page_Controller
 
     /**
      * Renders the search template from a given Solr search result, suggestion and search term.
-     * @return HTMLText search results template.
+     *
+     * @return array Including search results as a PaginatedList.
      */
     protected function parseSearchResults($results, $suggestion, $keywords)
     {
