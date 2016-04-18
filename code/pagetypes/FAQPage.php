@@ -259,18 +259,21 @@ class FAQPage_Controller extends Page_Controller
             $this->httpError(404);
         }
 
-        // Record the view of article and link it to the search and result set
-        $trackingID = $request->getVar('t');
+        // Record the view of article and link it to the search and result set if the
+        // session ID matches
+        extract($this->getTrackingIDs($this->request->getVar('t')));
         $sessID = session_id();
-        if ($trackingID && $sessID) {
-            $resultsLog = FAQResults::get()->filter(array(
-                'ID' => $trackingID
+        if ($sessID && $trackingSearchID) {
+
+            $searchLog = FAQSearch::get()->filter(array(
+                'ID' => $trackingSearchID,
+                'SessionID' => $sessID
             ))->first();
 
-            if ($resultsLog && $resultsLog->exists() && $resultsLog->Search()->SessionID == $sessID) {
+            if ($searchLog && $searchLog->exists()) {
                 $articleLogID = FAQResults_Article::create(array(
-                    'SearchID' => $resultsLog->SearchID,
-                    'ResultSetID' => $resultsLog->ID,
+                    'SearchID' => $trackingSearchID,
+                    'ResultSetID' => $trackingResultsID,
                     'FAQID' => $faq->ID
                 ))->write();
             }
@@ -306,19 +309,30 @@ class FAQPage_Controller extends Page_Controller
         $query = $this->getSearchQuery($keywords);
         try {
             $searchResult = $this->doSearch($query, $start, $limit);
-
             $results = $searchResult->Matches;
 
             // Log the search query and result set for the query
             $sessID = session_id();
-            $trackingID = null;
             if ($sessID) {
-                $searchLogID = FAQSearch::create(array(
-                    'SessionID' => $sessID,
-                    'Term' => $keywords,
-                    'TotalResults' => $results->getTotalItems()
-                ))->write();
+                extract($this->getTrackingIDs($this->request->getVar('t')));
 
+                // If the tracking ID is set then use existing search log if the log is for the same session
+                if ($trackingSearchID) {
+                    $searchLog = FAQSearch::get()->filter(array(
+                        'ID' => $trackingSearchID,
+                        'SessionID' => $sessID
+                    ))->first();
+                    $searchLogID = ($searchLog && $searchLog->exists()) ? $searchLog->ID : null;
+                } else {
+                    $searchLogID = FAQSearch::create(array(
+                        'SessionID' => $sessID,
+                        'Term' => $keywords,
+                        'TotalResults' => $results->getTotalItems()
+                    ))->write();
+                }
+
+                // A valid search log ID exists for this session, a new results set log
+                // is created, results logs are not re-used, each page of results viewed is a new log entry
                 if ($searchLogID) {
                     $resultsLogID = FAQResults::create(array(
                         'SearchID' => $searchLogID,
@@ -326,15 +340,18 @@ class FAQPage_Controller extends Page_Controller
                         'SetSize' => count($results->map())
                     ))->write();
                 }
-                $trackingID = $resultsLogID;
+
+                // Loop through page of results and append the full tracking code to each article link
+                if ($searchLogID && $resultsLogID) {
+                    foreach ($results as $result) {
+                        $result->trackingID = $searchLogID . '_' . $resultsLogID;
+                    }
+                }
+
+                // Append partial tracking code to each pagination link
+                $results->setTrackingURL($this->request, $searchLogID . '_');
             }
 
-            // Loop through page of results and append the tracking code
-            if ($trackingID) {
-                foreach ($results as $result) {
-                    $result->trackingID = $trackingID;
-                }
-            }
 
             // if the suggested query has a trailing '?' then hide the hardcoded one from 'Did you mean <Suggestion>?'
             $showTrailingQuestionmark = !preg_match('/\?$/', $searchResult->Suggestion);
@@ -357,6 +374,20 @@ class FAQPage_Controller extends Page_Controller
         }
 
         return $renderData;
+    }
+
+    /**
+     * Helper to extract tracking IDs from a get param in the format id_id.
+     *
+     * @param  string $id ID from GET param in format id_id.
+     * @return array      Array with the IDs extracted
+     */
+    protected function getTrackingIDs($id) {
+        $ids = array();
+        $parts = explode('_', $id);
+        $ids['trackingSearchID'] = (isset($parts[0])) ? $parts[0] : null;
+        $ids['trackingResultsID'] = (isset($parts[1])) ? $parts[1] : null;
+        return $ids;
     }
 
     /**
